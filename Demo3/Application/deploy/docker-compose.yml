@@ -1,0 +1,71 @@
+version: '3.1'
+
+services:
+
+  zookeeper:
+    image: bitnami/zookeeper:latest
+    ports:
+      - 2181:2181
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+
+  kafka:
+    image: wurstmeister/kafka:latest
+    depends_on:
+      - zookeeper
+    ports:
+      - 9092:9092    
+    env_file:
+      - ./env-variables/kafka.env
+ 
+  messaging:
+    build: messaging
+    depends_on:
+      - kafka
+    ports:
+      - 8084:8080
+    env_file:
+      - ./env-variables/messaging.env  
+
+  identity:
+    build: identity
+    ports:
+      - 8080:8080
+    env_file:
+      - ./env-variables/identity.env
+
+  payment:
+    build: payment
+    ports:
+      - 8083:8080
+    env_file:
+      - ./env-variables/payment.env
+
+  trip:
+    build: trip
+    depends_on:
+      - kafka
+    ports:
+      - 8082:8080
+    env_file:
+      - ./env-variables/trip.env 
+
+  vehicle:
+    build: vehicle
+    depends_on:
+      - kafka
+    ports:
+      - 8081:8080
+    env_file:
+      - ./env-variables/vehicle.env
+
+  simulator:
+    build: simulator
+    depends_on:
+      - kafka
+      - vehicle
+    ports:
+      - 8088:8080
+    env_file:
+      - ./env-variables/simulator.env    
+...

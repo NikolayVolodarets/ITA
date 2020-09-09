@@ -1,0 +1,126 @@
+---
+- name: Create infrastructure
+  hosts: localhost
+  connection: local
+  gather_facts: no
+
+  vars_files:
+  - var
+
+  tasks:
+   - name: create router
+     gcp_compute_router:
+      name: nat-router2
+      network: selfLink=https://www.googleapis.com/compute/v1/projects/thirddemo-273115/global/networks/default
+      region: europe-west3
+      project: "{{ project_id }}"
+      auth_kind: serviceaccount
+      service_account_file: "{{ credentials_file }}"
+      state: present
+
+   - name: nat config
+     shell: gcloud compute routers nats create nat-config --router=nat-router2 --auto-allocate-nat-external-ips --nat-all-subnet-ip-ranges --enable-logging 
+     ignore_errors: yes
+
+   - name: Launch container optimized instances
+     gce:
+      base_name: docker
+      num_instances: 1
+      machine_type: "{{ machine_type }}"
+      image: "{{ image }}"
+      network: default
+      external_ip: none
+      service_account_email: "{{ service_account_email }}"
+      credentials_file: "{{ credentials_file }}"
+      project_id: "{{ project_id }}"
+      zone: europe-west3-c
+      tags: 
+       - webserver
+       - http-server
+     register: gce
+
+   - name: Save hosts data
+     add_host:
+      hostname: "{{ item.private_ip }}"
+      groupname: gce_instaces_java
+     with_items: "{{ gce.instance_data }}"
+
+   - name: Get ip container os 
+     local_action: shell echo {{ item.private_ip }} > /home/gitlab-runner/ips/ip_container.txt
+     with_items: "{{ gce.instance_data }}"
+
+   - name: Wait for SSH for instances
+     wait_for:
+      delay: 10
+      host: "{{ item.private_ip }}"
+      port: 22
+      state: started
+      timeout: 60
+     with_items: "{{ gce.instance_data }}"
+
+   - name: Create gce load balancer
+     gce_lb:
+      name: testlb
+      region: europe-west3
+      members: ["europe-west3-c/docker-000"]
+      httphealthcheck_name: hc
+      httphealthcheck_port: 8080
+      httphealthcheck_path: "/"
+      service_account_email: "{{ service_account_email }}"
+      credentials_file: "{{ credentials_file }}"
+      project_id: "{{ project_id }}"
+
+   - name: create db instance
+     gcp_sql_instance:
+      name: test9-db
+      database_version: POSTGRES_11
+      settings:
+       tier: db-custom-1-3840
+      region: europe-west3
+      auth_kind: serviceaccount
+      service_account_file: "{{ credentials_file }}"
+      project: "{{ project_id }}"
+      state: present
+     register: instance_db
+
+   - name: create databases
+     gcp_sql_database:
+      name: "{{ item }}"
+      charset: utf8
+      instance: "{{ instance_db.name }}"
+      auth_kind: serviceaccount
+      service_account_file: "{{ credentials_file }}"
+      project: "{{ project_id }}"
+      state: present
+     with_items: 
+      - identity
+      - messaging
+      - payment
+      - trip
+      - vehicle
+     ignore_errors: yes      
+
+   - name: disable public ip
+     shell: gcloud --project="{{ project_id }}" beta sql instances patch test9-db --network=default --no-assign-ip
+
+   - name: get ip database
+     shell: gcloud --project="{{ project_id }}" sql instances describe "{{ instance_db.name }}" | grep -oE "\b((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b" > /home/gitlab-runner/ips/ip_db.txt
+ 
+   - name: set password for database
+     shell: gcloud sql users set-password postgres --instance=test9-db --password="{{ password_db }}"
+
+
+- name: Configure Hosts
+  hosts: gce_instaces_java
+  become: yes
+  tasks:
+
+    - name: docker-compose
+      script: docker_comp.sh
+      args:
+        executable: /bin/bash
+
+    - name: source
+      shell:
+        cmd: source /home/gitlab-runner/.bashrc
+...

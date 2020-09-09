@@ -1,0 +1,5 @@
+---
+
+credentials_file: $JSON_KEY
+machine_type: n1-standard-2
+image: cos-stable

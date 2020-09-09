@@ -1,0 +1,113 @@
+image: maven:3.6.3-jdk-8
+
+stages:
+  - build
+  - db_update
+  - deploy
+
+before_script:
+  - 'which ssh-agent || ( apt update -y && apt install openssh-client -y)'
+  - eval $(ssh-agent -s)
+  - ssh-add <(echo "$SSH_PRIVATE_KEY")
+  - mkdir -p ~/.ssh
+  - '[[ -f /.dockerenv ]] && echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config'
+
+build_gateway:
+  stage: build
+  script:
+    - cd Gateway
+    - mvn -ntp package
+  only:
+    changes:
+      - Gateway/**/*
+  artifacts:
+    paths:
+    - Gateway/target/*.jar
+    expire_in: 20 min
+
+build_customer:
+  stage: build
+  script:
+    - cd CustomerService
+    - mvn -ntp package
+  only:
+    changes:
+      - CustomerService/**/*
+  artifacts:
+    paths:
+    - CustomerService/target/*.jar
+    expire_in: 20 min
+
+build_billing:
+  stage: build
+  script:
+    - cd BillingService
+    - mvn -ntp package
+  only:
+    changes:
+      - BillingService/**/*
+  artifacts:
+    paths:
+    - BillingService/target/*.jar
+    expire_in: 20 min
+
+build_discovery:
+  stage: build
+  script:
+    - cd ServiceDiscovery
+    - mvn -ntp package
+  only:
+    changes:
+      - ServiceDiscovery/**/*
+  artifacts:
+    paths:
+    - ServiceDiscovery/target/*.jar
+    expire_in: 20 min
+
+deploy_gateway:
+  stage: deploy
+  script:
+    - scp deploy.sh Gateway/target/*.jar $USERNAME@$INTERNAL_IP_GATEWAY:/tmp
+    - ssh $USERNAME@$INTERNAL_IP_GATEWAY "cd /tmp && bash deploy.sh"
+  only:
+    changes:
+      - Gateway/**/*
+
+deploy_customer:
+  stage: deploy
+  script:
+    - scp deploy.sh CustomerService/target/*.jar $USERNAME@$INTERNAL_IP_CUSTOMER:/tmp
+    - ssh $USERNAME@$INTERNAL_IP_CUSTOMER "cd /tmp && bash deploy.sh"
+  only:
+    changes:
+      - CustomerService/**/*
+
+deploy_billing:
+  stage: deploy
+  script:
+    - scp deploy.sh BillingService/target/*.jar $USERNAME@$INTERNAL_IP_BILLING:/tmp
+    - ssh $USERNAME@$INTERNAL_IP_BILLING "cd /tmp && bash deploy.sh"
+  only:
+    changes:
+      - BillingService/**/*
+
+deploy_discovery:
+  stage: deploy
+  script:
+    - scp deploy.sh ServiceDiscovery/target/*.jar $USERNAME@$INTERNAL_IP_DISCOVERY:/tmp
+    - ssh $USERNAME@$INTERNAL_IP_DISCOVERY "cd /tmp && bash deploy.sh"
+  only:
+    changes:
+      - ServiceDiscovery/**/*
+
+liquibase:
+  stage: db_update
+  before_script:
+    - mkdir liquibase && cd liquibase
+    - wget https://github.com/liquibase/liquibase/releases/download/v3.8.8/liquibase-3.8.8.tar.gz
+    - tar xvf liquibase-3.8.8.tar.gz && rm liquibase-3.8.8.tar.gz
+    - export PATH=$PATH:/builds/root/Application/liquibase
+    - liquibase --version
+  script:
+    - echo "Update"
+  when: manual

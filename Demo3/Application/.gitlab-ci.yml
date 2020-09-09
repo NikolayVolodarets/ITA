@@ -1,0 +1,260 @@
+---
+stages:
+  - build
+  - deploy
+  - update
+
+variables:
+  PATH_JAR:      target/*.jar
+  PATH_DEPLOY:  /var/kick-scooter
+
+
+#------------------------------------#
+#    Create Status Tracking Files    #
+#------------------------------------#
+
+create_status_files:
+  stage: .pre
+  script:
+    - IP_APP=$( cat ~/ips/ip_container.txt )
+    - >
+      ssh -o StrictHostKeyChecking=no $USERNAME_APP@$IP_APP
+      "sudo chown $USERNAME_APP /var &&
+      mkdir -p $PATH_DEPLOY && cd $PATH_DEPLOY &&
+      mkdir .changes && cd .changes &&
+      echo 0 > identity &&
+      echo 0 > vehicle &&
+      echo 0 > trip &&
+      echo 0 > payment &&
+      echo 0 > messaging &&
+      echo 0 > simulator"
+  only:
+    changes:
+      - services/**/*
+
+
+#------------------------------#
+#    Application Build Part    #
+#------------------------------#
+
+build_identity:
+  stage: build
+  script:
+    - cd services/identity/identity-starter
+    - mvn clean install
+    - cd .. && cd identity-service
+    - mvn clean package
+  artifacts:
+    paths:
+    - services/identity/identity-service/$PATH_JAR
+    expire_in: 10 min
+  only:
+    changes:
+      - services/identity/**/*
+
+.build_template: &build_template
+  stage: build
+  script:
+    - cd services/$PATH_SERVICE
+    - mvn clean package
+  artifacts:
+    paths:
+    - services/$PATH_SERVICE/$PATH_JAR
+    expire_in: 10 min
+
+build_simulator:
+  <<: *build_template
+  variables:
+    PATH_SERVICE: simulator
+  only:
+    changes:
+      - services/simulator/**/*
+
+build_vehicle:
+  <<: *build_template
+  variables:
+    PATH_SERVICE: vehicle
+  only:
+    changes:
+      - services/vehicle/**/*
+
+build_trip:
+  <<: *build_template
+  variables:
+    PATH_SERVICE: trip
+  only:
+    changes:
+      - services/trip/**/*
+
+build_payment:
+  <<: *build_template
+  variables:
+    PATH_SERVICE: payment
+  only:
+    changes:
+      - services/payment/**/*
+
+build_messaging:
+  <<: *build_template
+  variables:
+    PATH_SERVICE: messaging
+  only:
+    changes:
+      - services/messaging/**/*
+
+
+#-----------------------------------#
+#    Application Deployment Part    #
+#-----------------------------------#
+
+deploy_preparing:
+  stage: deploy
+  before_script:
+    - IP_APP=$( cat ~/ips/ip_container.txt )
+    - IP_DB=$( cat ~/ips/ip_db.txt )
+    - cd deploy && cp -r /home/$USERNAME_APP/env-variables .
+    - "echo DATASOURCE_URL=jdbc:postgresql://$IP_DB:5432/identity >> env-variables/identity.env"
+    - "echo DATABASE_URL=jdbc:postgresql://$IP_DB:5432/messaging >> env-variables/messaging.env"
+    - "echo DATABASE_URL=jdbc:postgresql://$IP_DB:5432/payment >> env-variables/payment.env"
+    - "echo DATABASE_URL=jdbc:postgresql://$IP_DB:5432/trip >> env-variables/trip.env"
+    - "echo DATABASE_URL=jdbc:postgresql://$IP_DB:5432/vehicle >> env-variables/vehicle.env"
+    - "echo STRIPE_PUBLIC_KEY=$STRIPE_KEY >> env-variables/payment.env"
+    - "echo STRIPE_SECRET_KEY=$STRIPE_SECRET >> env-variables/payment.env"
+  script:
+    - >
+      scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+      -r env-variables deploy.sh docker-compose.yml
+      $USERNAME_APP@$IP_APP:$PATH_DEPLOY
+  only:
+    changes:
+      - deploy/**/*
+  dependencies: []
+
+deploy_identity:
+  stage: deploy
+  variables:
+    PATH_SERVICE: identity/identity-service
+  script:
+    - IP_APP=$( cat ~/ips/ip_container.txt )
+    - mkdir identity
+    - cp services/$PATH_SERVICE/$PATH_JAR services/$PATH_SERVICE/Dockerfile identity
+    - > 
+      scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+      -r identity $USERNAME_APP@$IP_APP:$PATH_DEPLOY
+    - >
+      ssh -o StrictHostKeyChecking=no $USERNAME_APP@$IP_APP
+      "echo 1 > $PATH_DEPLOY/.changes/identity"
+  only:
+    changes:
+      - services/identity/**/*
+  dependencies:
+    - build_identity
+
+.deploy_template: &deploy_template
+  stage: deploy
+  script:
+    - IP_APP=$( cat ~/ips/ip_container.txt )
+    - mkdir $SERVICE
+    - cp services/$SERVICE/$PATH_JAR services/$SERVICE/Dockerfile $SERVICE
+    - >
+      scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+      -r $SERVICE $USERNAME_APP@$IP_APP:$PATH_DEPLOY
+    - >
+      ssh -o StrictHostKeyChecking=no $USERNAME_APP@$IP_APP
+      "echo 1 > $PATH_DEPLOY/.changes/$SERVICE"
+
+deploy_simulator:
+  <<: *deploy_template
+  variables:
+    SERVICE: simulator
+  only:
+    changes:
+      - services/simulator/**/*
+  dependencies:
+    - build_simulator
+
+deploy_vehicle:
+  <<: *deploy_template
+  variables:
+    SERVICE: vehicle
+  only:
+    changes:
+      - services/vehicle/**/*
+  dependencies:
+    - build_vehicle
+
+deploy_trip:
+  <<: *deploy_template
+  variables:
+    SERVICE: trip
+  only:
+    changes:
+      - services/trip/**/*
+  dependencies:
+    - build_trip
+
+deploy_payment:
+  <<: *deploy_template
+  variables:
+    SERVICE: payment
+  only:
+    changes:
+      - services/payment/**/*
+  dependencies:
+    - build_payment
+
+deploy_messaging:
+  <<: *deploy_template
+  variables:
+    SERVICE: messaging
+  only:
+    changes:
+      - services/messaging/**/*
+  dependencies:
+    - build_messaging
+  
+restart_services:
+  stage: deploy
+  script:
+    - IP_APP=$( cat ~/ips/ip_container.txt )
+    - >
+      ssh -o StrictHostKeyChecking=no $USERNAME_APP@$IP_APP
+      "cd $PATH_DEPLOY && bash deploy.sh"
+  only:
+    changes:
+      - services/**/*
+  dependencies: []
+
+
+#----------------------------#
+#    Database Update Part    #
+#----------------------------#
+
+.update_template: &update_template
+  stage: update
+  before_script:
+    - IP_DB=$( cat ~/ips/ip_db.txt )
+    - cd database-changelogs
+    - "echo url: jdbc:postgresql://$IP_DB:5432/gitlab >> liquibase.properties"
+    - "echo username: $USERNAME_DB >> liquibase.properties"
+    - "echo password: $PASS_DB >> liquibase.properties"
+    - wget https://jdbc.postgresql.org/download/postgresql-42.2.12.jar
+    - export PATH=$PATH:/opt/liquibase
+  script:
+    - liquibase $TASK
+  only:
+    changes:
+      - database-changelogs/**/*
+  dependencies: []
+  when: manual
+
+update_database:
+  <<: *update_template
+  variables:
+    TASK: update
+
+rollback_database:
+  <<: *update_template
+  variables:
+    TASK: rollbackCount 1
+...

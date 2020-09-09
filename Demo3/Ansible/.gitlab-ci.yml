@@ -1,0 +1,20 @@
+---
+stages:
+  - create
+
+create_infrastructure:
+  stage: create
+  before_script:
+    - "echo service_account_email: $SERVICE_EMAIL >> Playbook/var"
+    - "echo project_id: $PROJECT_ID >> Playbook/var"
+    - "echo password_db: $PASS_DB >> Playbook/var"
+    - export ANSIBLE_HOST_KEY_CHECKING=False
+    - "[ -e ~/.ssh/known_hosts ] && rm ~/.ssh/known_hosts"
+  script:
+    - ansible-playbook Playbook/infrastructure.yml
+  after_script:
+    - unset ANSIBLE_HOST_KEY_CHECKING
+  only:
+    changes:
+      - Playbook/**/*
+...
