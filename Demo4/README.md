@@ -5,9 +5,13 @@ Project Description
 As the member of DevOps group at SoftServe IT Academy implement the infrastructure for the microservice Java Web application.
 
 The ["Kick Scooter" application](https://github.com/KickScooterTeam) was being developed by the Java team at the IT Academy. The main purpose of this application is to provide a service for renting electric kick scooters.<br/>
+
 Application deployment was performed on **Google Cloud Platform** and **Microsoft Azure**.<br/>
+
 On **Google Cloud Platform** we created **Cloud SQL** for **PostgreSQL** databases (a separate database was created for each microservice), **Compute Engine** with **Prometheus** and **Grafana** for monitoring, **Compute Engine** with **TeamCity** for CI/CD.<br/>
+
 On **Microsoft Azure** we created **Application Gateway** for web traffic load balancer, **Virtual machine scale set** for microservice application.<br/>
+
 The interaction between the two clouds was performed via **VPN**, which was configured on each cloud.
 
 Link to project repositories
@@ -16,7 +20,7 @@ Link to project repositories
 
 Infrastructure
 --------------
-![infrastructure](https://github.com/NikolayVolodarets/ITA/blob/master/Demo4/Infrastructure.jpg)
+[Infrastructure](https://drive.google.com/file/d/1BSzMsxgiWq5LLroAv8MNa-9fR1n8nJWQ/view)
 
 Responsibilities
 ----------------
